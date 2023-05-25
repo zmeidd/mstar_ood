@@ -1,0 +1,61 @@
+{% extends "layout.html" %}
+
+{% block content %}
+	<form class="form-signin" method=post enctype=multipart/form-data>
+		<h1 class="h2 mb-3 font-weight-normal">Out of distribution detector(EMSTDP)</h1>
+		<h2 class="h4 mb-3 font-weight-normal">Please Upload The Image</h2>
+		<input type="file" name="file" class="form-control-file" id="inputfile"  onchange="preview_image(event)">
+		<br />
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="options" id="options1" value="option1" checked>
+			<label class="form-check-label" for="options1">
+			  With outlier exposure
+			</label>
+		  </div>
+		  <div class="form-check">
+			<input class="form-check-input" type="radio" name="options" id="options2" value="option2">
+			<label class="form-check-label" for="options2">
+			  Without outlier exposure
+			</label>
+		  </div>
+					
+		<img id="output-image" class="rounded mx-auto d-block"/>
+		<button class="btn btn-lg btn-primary btn-block" type="submit">Upload</button>
+	</form>
+	<h2 class="h4 mb-3 font-weight-normal">Trained images(ZSU,2S1)</h2>
+	<figure class="figure">
+  	<img src="/static/zsu1.jpeg" class="rounded float-start">
+  	<figcaption class="figure-caption text-center">ZSU</figcaption>
+	</figure>
+	<figure class="figure">
+  	<img src="/static/zsu2.jpeg" class="rounded float-start">
+  	<figcaption class="figure-caption text-center">ZSU</figcaption>
+	</figure>
+	<figure class="figure">
+	<img src="/static/zsu3.jpeg" class="rounded float-start">
+  	<figcaption class="figure-caption text-center">ZSU</figcaption>
+	</figure>
+	<figure class="figure">
+	<img src="/static/2s11.jpeg" class="rounded float-start">
+  	<figcaption class="figure-caption text-center">2S1</figcaption>
+	</figure>
+	<figure class="figure">
+	<img src="/static/2s12.jpeg" class="rounded float-start">
+  	<figcaption class="figure-caption text-center">2S1</figcaption>
+	</figure>
+
+	<figure class="figure">
+  	<img src="/static/2s13.jpeg" class="rounded float-end">
+  	<figcaption class="figure-caption text-center">2S1</figcaption>
+	</figure>
+	<script type="text/javascript">
+		function preview_image(event) {
+			var reader = new FileReader();
+			reader.onload = function(){
+				var output = document.getElementById('output-image')
+				output.src = reader.result;
+			}
+			reader.readAsDataURL(event.target.files[0]);
+		}
+	</script>
+{% endblock %}

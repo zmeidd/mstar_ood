@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+{% block content %}
+	<form class="form-signin" method=post enctype=multipart/form-data>
+		{% if score < -0.15 %}
+			<h1 class="h1 mb-3 font-weight-normal"> This is an in-distribution image! </h1>
+		{% else %}
+			<h1 class="h1 mb-3 font-weight-normal"> This is an out-of-distribution image!</h5>
+		{% endif %}
+		<img id="picture" src="data:image/jpeg;base64,{{ img }}">
+	</form>
+{% endblock %}
