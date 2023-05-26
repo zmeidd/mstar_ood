@@ -4,10 +4,11 @@ The Repo contains OOD detection using EMSTDP python implementation.
 ```bash
 python EMSTDP_main.py
 ```
-The file also generates AUROC curve and prints out FPR95, AUPR , AUROC results under the *get_and_print_results()* function.
+EMSTDP OOD adopts outlier exposure algorithm to train with 2 classes MSTAR data. The file also generates AUROC curve and prints out FPR95, AUPR , AUROC results under the *get_and_print_results()* function.
 EMSTDP uses MNIST as the outlier data. 
 ### To run the website 
 ```bash
 python app.py
 ```
+The file contains FLASK website implementation of OOD detection using pretrained EMSTDP outlier weights oe_w_h.npy and oe_w_o.npy.
 
