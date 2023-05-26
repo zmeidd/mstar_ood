@@ -14,10 +14,10 @@ python app.py
 ```
 The file contains Flask website implementation of OOD detection using pretrained EMSTDP outlier weights oe_w_h.npy and oe_w_o.npy.
 ### Requirements
--Flask 2.3.2
--Python >= 3.4
--SKlearn >= 1.2.0
--Numpy >= 1.24.0
--Pytorch >= 1.13.0
--Torch >= 0.13.0
+- Flask 2.3.2
+- Python >= 3.4
+- SKlearn >= 1.2.0
+- Numpy >= 1.24.0
+- Pytorch >= 1.13.0
+- Torch >= 0.13.0
 
