@@ -129,3 +129,439 @@ def show_performance_comparison(pos_base, neg_base, pos_ours, neg_ours, baseline
         100 * aupr_base, 100 * aupr_ours))
     # print('FDR{:d}:\t\t\t{:.2f}\t\t{:.2f}'.format(
     #     int(100 * recall_level), 100 * fdr_base, 100 * fdr_ours))
+
+
+from scipy.ndimage.measurements import label
+import torch
+import numpy as np
+from scipy.ndimage.interpolation import rotate
+from torchvision import datasets, transforms
+import os
+from keras.models import Model
+import keras
+from tqdm import tqdm, tqdm_gui, tnrange, tgrange, trange
+
+
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+# class new_set(Dataset):
+#     def __init__(self, data,labels):
+#         self.data = data
+#         self.label = labels
+
+
+#     def __getitem__(self, index):
+#         return self.data[index] ,self.label[index]
+    
+#     def __len__(self):
+#         return (len(self.data))
+
+# #output flatten feature maps of the pretrained kearas model
+# # 1, 5000, 784
+# def keras_predict(input_x, model ,num_classes =10):
+#     #train_x shape
+#     layer_name = 'after_flatten'
+#     input_x = np.reshape(input_x, (input_x.shape[1],28,28,1))
+#     intermediate_layer_model = Model(inputs=model.input,
+#                                  outputs=model.get_layer(layer_name).output)
+
+#     train_x = intermediate_layer_model(input_x) 
+
+#     # length 512
+#     #return 1, length 512
+#     train_x = np.reshape(train_x, (1, train_x.shape[0], train_x. shape[1]))
+
+#     return train_x
+
+#output flatten feature maps of the pretrained kearas model
+# 1, 5000, 784
+def keras_predict(input_x, model):
+    #train_x shape
+    layer_name = 'after_flatten'
+    input_x = np.reshape(input_x, (100,28,28,1))
+    intermediate_layer_model = Model(inputs=model.input,
+                                 outputs=model.get_layer(layer_name).output)
+
+    train_x = intermediate_layer_model(input_x) 
+
+    # length 512
+    #return 1, length 512
+    train_x = np.reshape(train_x, (1,100,512))
+
+    return train_x
+    
+    
+
+# train_pretrained_conv
+def train_oe(snn_predict, d_15_train, d_15_train_label,batch_size =10, T = 100, dense_size = 512,
+ detect_size = 1,
+ mem=[],
+ mem_label = [],
+ task_id= False,
+ k = 0,
+ idx0=[],
+ idx1 =[],
+ old_weights = None,
+):
+    ep = 0
+    fr = 1.0
+    max = 0
+    w_h_max = None
+    w_o_max = None
+    detect =0
+    s_index = (np.linspace(0, d_15_train_label.shape[0] - 1, d_15_train_label.shape[0])).astype(int)
+    if len(mem_label)!=0:
+         h_index = (np.linspace(0, mem_label.shape[0] - 1, mem_label.shape[0])).astype(int)
+    while ep < 1:
+            if detect ==0:
+                task_id = True
+            else:
+                task_id = False
+            snn_predict.lr = 0.0002 -ep*0.000001
+            pred1 = np.zeros([d_15_train_label.shape[0]])
+            spikes = np.zeros([T, batch_size, dense_size]).astype(float)
+            if len(mem)!=0:
+                mem_pred1 = np.zeros([mem_label.shape[0]])
+                mem_spikes = np.zeros([T, batch_size, dense_size])
+
+            d_15_train_label = np.random.randint(6,size = len(d_15_train_label))
+            for i in trange(int (d_15_train_label.shape[0] / batch_size )):
+                if len(mem)!=0:
+                    if i%2 ==0:
+                            snn_predict.lr = 0.00025 -ep*0.000001
+                            k = int(len(mem_label)/batch_size) -1
+                            k = int(np.random.randint(k,size =1))
+                            tmp_rand = np.random.random([T, 1, 1])
+                            randy = np.tile(tmp_rand, (1, batch_size,dense_size))
+                            tmp_d = np.tile(mem[:, h_index[k * batch_size:(k + 1) * batch_size], :], (T, 1, 1))
+                            mem_spikes = randy < (tmp_d * fr)
+
+                            if len(idx0)!=0:
+                                pred1[k * batch_size:(k + 1) * batch_size], _= snn_predict.Train(mem_spikes.astype(float), (
+                                mem_label[h_index[k * batch_size:(k + 1) * batch_size]]),
+                                batch_size,
+                                task_start = task_id,
+                                h0_index = idx0,
+                                h1_index = idx1,
+                                past_weights  = old_weights)
+                            else:
+                                mem_pred1[k * batch_size:(k + 1) * batch_size], _= snn_predict.Train(mem_spikes.astype(float), (
+                                mem_label[h_index[k * batch_size:(k + 1) * batch_size]]),
+                                batch_size)
+
+                    
+                snn_predict.lr = 0.000001 -ep*0.000001
+                tmp_rand = np.random.random([T, 1, 1])
+                randy = np.tile(tmp_rand, (1, batch_size,dense_size))
+                tmp_d = np.tile(d_15_train[:, s_index[i * batch_size:(i + 1) * batch_size], :], (T, 1, 1))
+                spikes = randy < (tmp_d * fr)
+
+                if len(idx0)!=0:
+                    pred1[i * batch_size:(i + 1) * batch_size], _= snn_predict.Train(spikes.astype(float), (
+                    d_15_train_label[s_index[i * batch_size:(i + 1) * batch_size]]), 
+                    batch_size,
+                    task_start = task_id,
+                             h0_index = idx0,
+                             h1_index = idx1,
+                             past_weights  = old_weights)
+                else:
+                    pred1[i * batch_size:(i + 1) * batch_size], _= snn_predict.Train(spikes.astype(float), (
+                    d_15_train_label[s_index[i * batch_size:(i + 1) * batch_size]]), 
+                    batch_size)
+                
+                
+
+
+            acn = sum(pred1 == d_15_train_label[s_index[:d_15_train_label.shape[0]]]) / float(d_15_train_label.shape[0])
+            # uncommented if domain adaptation
+            if acn > max:
+                w_h_max = snn_predict.w_h
+                w_o_max = snn_predict.w_o
+                max = acn
+
+            if (acn < 0.99 and detect< detect_size):
+                ep = 0
+            else:
+                ep = ep +1
+            detect = detect + 1
+            print("epochs: "+ str(detect) + " train_accuray " + str(acn))
+    
+    # uncommented if domain adaptation
+    # snn_predict.w_h = w_h_max
+    # snn_predict.w_o = w_o_max
+    return snn_predict
+
+# # add guassian noise to the image:
+# def add_noise():
+
+
+
+
+
+
+# train_pretrained_conv
+def train_snn(snn_predict, d_15_train, d_15_train_label,batch_size =10, T = 100, dense_size = 512,
+ detect_size = 1,
+ mem=[],
+ mem_label = [],
+ task_id= False,
+ k = 0,
+ idx0=[],
+ idx1 =[],
+ old_weights = None,
+):
+    ep = 0
+    fr = 1.0
+    max = 0
+    w_h_max = None
+    w_o_max = None
+    detect =0
+    s_index = (np.linspace(0, d_15_train_label.shape[0] - 1, d_15_train_label.shape[0])).astype(int)
+    if len(mem_label)!=0:
+         h_index = (np.linspace(0, mem_label.shape[0] - 1, mem_label.shape[0])).astype(int)
+    while ep < 1:
+            if detect ==0:
+                task_id = True
+            else:
+                task_id = False
+            snn_predict.lr = 0.0002 -ep*0.000001
+            pred1 = np.zeros([d_15_train_label.shape[0]])
+            spikes = np.zeros([T, batch_size, dense_size]).astype(float)
+            if len(mem)!=0:
+                mem_pred1 = np.zeros([mem_label.shape[0]])
+                mem_spikes = np.zeros([T, batch_size, dense_size])
+
+
+            for i in trange(int (d_15_train_label.shape[0] / batch_size )):
+                if len(mem)!=0:
+                    if i%2 ==0:
+                            snn_predict.lr = 0.00025 -ep*0.000001
+                            k = int(len(mem_label)/batch_size) -1
+                            k = int(np.random.randint(k,size =1))
+                            tmp_rand = np.random.random([T, 1, 1])
+                            randy = np.tile(tmp_rand, (1, batch_size,dense_size))
+                            tmp_d = np.tile(mem[:, h_index[k * batch_size:(k + 1) * batch_size], :], (T, 1, 1))
+                            mem_spikes = randy < (tmp_d * fr)
+
+                            if len(idx0)!=0:
+                                pred1[k * batch_size:(k + 1) * batch_size], _= snn_predict.Train(mem_spikes.astype(float), (
+                                mem_label[h_index[k * batch_size:(k + 1) * batch_size]]),
+                                batch_size,
+                                task_start = task_id,
+                                h0_index = idx0,
+                                h1_index = idx1,
+                                past_weights  = old_weights)
+                            else:
+                                mem_pred1[k * batch_size:(k + 1) * batch_size], _= snn_predict.Train(mem_spikes.astype(float), (
+                                mem_label[h_index[k * batch_size:(k + 1) * batch_size]]),
+                                batch_size)
+
+                    
+                snn_predict.lr = 0.0005 -ep*0.000001
+                tmp_rand = np.random.random([T, 1, 1])
+                randy = np.tile(tmp_rand, (1, batch_size,dense_size))
+                tmp_d = np.tile(d_15_train[:, s_index[i * batch_size:(i + 1) * batch_size], :], (T, 1, 1))
+                spikes = randy < (tmp_d * fr)
+
+                if len(idx0)!=0:
+                    pred1[i * batch_size:(i + 1) * batch_size], _= snn_predict.Train(spikes.astype(float), (
+                    d_15_train_label[s_index[i * batch_size:(i + 1) * batch_size]]), 
+                    batch_size,
+                    task_start = task_id,
+                             h0_index = idx0,
+                             h1_index = idx1,
+                             past_weights  = old_weights)
+                else:
+                    pred1[i * batch_size:(i + 1) * batch_size], _= snn_predict.Train(spikes.astype(float), (
+                    d_15_train_label[s_index[i * batch_size:(i + 1) * batch_size]]), 
+                    batch_size)
+                
+                
+
+
+            acn = sum(pred1 == d_15_train_label[s_index[:d_15_train_label.shape[0]]]) / float(d_15_train_label.shape[0])
+            # uncommented if domain adaptation
+            if acn > max:
+                w_h_max = snn_predict.w_h
+                w_o_max = snn_predict.w_o
+                max = acn
+
+            if (acn < 0.99 and detect< detect_size):
+                ep = 0
+            else:
+                ep = ep +1
+            detect = detect + 1
+            print("epochs: "+ str(detect) + " train_accuray " + str(acn))
+    
+    # uncommented if domain adaptation
+    # snn_predict.w_h = w_h_max
+    # snn_predict.w_o = w_o_max
+    return snn_predict
+
+# # add guassian noise to the image:
+# def add_noise():
+
+
+
+
+def test_snn(snn_network,d_30_test, d_30_test_label, dense_size = 784, conv= False, total_test = 100, T =100 , test_batch =100):
+    
+
+    fr =1
+    outs = np.zeros((len(d_30_test_label),6))
+    if conv:
+        d_30_test = keras_predict(d_30_test,snn_network)
+    pred = np.zeros([total_test])
+    for i2 in trange(int (total_test/test_batch)):
+        tmp_rand = np.random.random([T, 1, 1])
+        randy = np.tile(tmp_rand, (1, test_batch, dense_size))
+        tmp_d = np.tile(d_30_test[:, i2 * test_batch:(i2 + 1) * test_batch, :], (T, 1, 1))
+        print("tmp_d shape", tmp_d.shape)
+        spikes2 = randy < (tmp_d * fr)
+        outs[i2 * test_batch:(i2 + 1) * test_batch], pred[i2 * test_batch:(i2 + 1) * test_batch] = snn_network.Test(spikes2.astype(float), test_batch)
+    acn = sum(pred == d_30_test_label[:total_test]) / float(total_test)
+    print("final test result is : ", acn)
+    wrong_index = np.where(pred !=d_30_test_label[:total_test] )
+    correct_index = np.where(pred ==d_30_test_label[:total_test] )
+
+    return acn, outs,wrong_index,correct_index
+
+
+
+def get_indices(snn_network,d_30_test, d_30_test_label, dense_size = 784, conv= False, total_test = 100, T =100 , test_batch =100):
+    
+
+    fr =1
+    if conv:
+        d_30_test = keras_predict(d_30_test,snn_network)
+    pred = np.zeros([total_test])
+    hid_0 = 0
+    hid_1 = 0
+    for i2 in trange(int (total_test/test_batch)):
+        tmp_rand = np.random.random([T, 1, 1])
+        randy = np.tile(tmp_rand, (1, test_batch, dense_size))
+        tmp_d = np.tile(d_30_test[:, i2 * test_batch:(i2 + 1) * test_batch, :], (T, 1, 1))
+        print("tmp_d shape", tmp_d.shape)
+        spikes2 = randy < (tmp_d * fr)
+        hid_0, hid_1 = snn_network.validate(spikes2.astype(float), test_batch)
+
+    
+    return hid_0, hid_1
+
+def balance_data(labels):
+    check = dict()
+    for i in range(4):
+        check[str(i)] = []
+    #append index to each data
+    for j in range(len(labels)):
+        check[str(labels[j])].append(j)
+    min = 10000000
+    for x in check:
+        if len(check[str(x)]) < min:
+            min = len(check[str(x)])
+
+    # final index list:
+    index = []
+    for x in check:
+        index = index + check[str(x)][0:min]
+    
+    return np.array(index)
+
+
+
+# generating random dataset
+def gen_dataset(train_set ,runs = 5, degree =30):
+    N = len(train_set)
+    new_set = np.zeros((N,1,28,28))
+    new_setlabel = []
+    bs = int(N/degree)
+    for i in range(degree):
+        for j in range(bs):
+            img = train_set[i*bs+j][0].numpy()
+            img = np.reshape(img,(28,28))
+            img_ = rotate(img, angle = i, reshape = False)
+            new_set[i*bs+j,0,:,:] = img_
+            new_setlabel.append(train_set[i*bs+j][1]) 
+    
+
+
+
+    return new_set, np.array(new_setlabel)
+
+
+
+
+# # return the data loader for the rotation
+# # d is the degree for the rotation
+# # bs is batch size
+# def rotate_data(train_set, num,i_d, d, bs=64):
+#     # train_set image: (len,1,28,28)
+#     rd_index = np.random.randint(len(train_set)-1, size = num)
+#     label = []
+#     data = torch.zeros(num,1,28,28)
+#     for i in range(num):
+#         img = train_set[rd_index[i]][0].numpy()
+#         img = np.reshape(img,(28,28))
+#         img_ = rotate(img, angle = (i_d+1)*d, reshape = False)
+#         data[i] = torch.tensor(img_.reshape((1,28,28)))
+#         label.append(int(train_set[rd_index[i]][1]))
+#     new_train = new_set(data,label)
+#     new_loader = torch.utils.data.DataLoader(new_train,
+#   batch_size=bs, shuffle=True)
+
+#     return new_loader
+
+
+# # return predict labels
+# def predict(loader,model, confidence_q =0.1, bs =64):
+#     new_data = None
+#     label = []
+#     for i_batch, (data, target) in enumerate(loader):
+#         data = data.to(device,dtype=torch.float)
+#         # out put is the logits
+#         out = model(data)
+#         confidence =  torch.max( out,dim =1 ).values - torch.min(out, dim=1).values
+#         alpha = torch.quantile(confidence.to(torch.float), confidence_q)
+#         indices = torch.where(confidence >= alpha)
+#         preds = out.data.max(1, keepdim=True)[1]
+#         preds = preds.reshape((preds.shape[0],))
+#         if i_batch == 0:
+#             new_data = data[indices]
+#             label = preds
+#         else:
+#             new_data = torch.vstack((new_data,data[indices]))
+#             label = torch.cat((label, preds))
+#     new_dataset = new_set(new_data,label)
+#     new_loader = torch.utils.data.DataLoader(new_dataset,
+#   batch_size=bs, shuffle=True)
+
+#     return new_loader 
+
+
+# # return predict labels
+# def predict(loader,model, confidence_q =0.1, bs =64):
+#     new_data = None
+#     label = []
+#     correct = 0
+#     for i_batch, (data, target) in enumerate(loader):
+#         data = data.to(device,dtype=torch.float)
+#         # out put is the logits
+#         out = model(data).to(device)
+#         preds = out.data.max(1, keepdim=True)[1].to(device)
+#         correct += preds.eq(target.data.view_as(preds)).sum()
+#         preds = preds.reshape((preds.shape[0],))
+#         if i_batch == 0:
+#             new_data = data
+#             label = preds
+#         else:
+#             new_data = torch.vstack((new_data,data))
+#             label = torch.cat((label, preds))
+#     acc = 100. * correct / len(train_loader.dataset)
+#     new_dataset = new_set(new_data,label)
+#     new_loader = torch.utils.data.DataLoader(new_dataset,
+#   batch_size=bs, shuffle=True)
+#     return new_loader 
+
+
+
