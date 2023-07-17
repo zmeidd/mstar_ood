@@ -1,13 +1,36 @@
 import numpy as np
 import opt_einsum as oe
+import math
+import torch
+import torch.nn as nn
+from numpy import linalg as LA
 
-np.random.seed(0)
+
+
+### derivative of l2 norm of a Wij, return derivatives
+#idx0: row index, idx1:column index
+def l2_derivative(w_c,w_past , idx0,idx1):
+    w = w_c -w_past
+    base = LA.norm(w)
+    w_ = np.zeros_like(w)
+    for i in range(len(idx0)):
+        for j in range(len(idx1)):
+            w_[i,j] = w[i,j]*(base**2)/(base)**1.5
+
+    return w_
+
+
+
+
+
+
+
 ### Network class for the SNN
 class Network(object):
 
     def __init__(self, dfa, dropr, evt, norm, rel, delt, dr, init, clp, lim, inputs, hiddens, outputs, threshold_h, threshold_o, T=100, bias=0.0, lr=0.0001, scale=1.0, twin=100, epsilon=2,
             
-            online_norm = False, train_oe = False, label_logits = 0
+            online_norm = False
             ):
 
         self.T = T              # time window
@@ -63,6 +86,12 @@ class Network(object):
         self.threshold_o = []
         self.ethreshold_h = []
         self.ethreshold_o = []
+        self.probe_spike = []
+        self.out_spike = []
+        self.probe_spike_2 = []
+        self.snn_h0_1 = []
+        self.snn_h0_2 = []
+        self.deri =[]
 
         self.w_h, self.w_o = self.Init_ForwardWgt(inputs, outputs, hiddens, init)
 
@@ -79,7 +108,6 @@ class Network(object):
 
         self.energy = 0.0
         self.iterations = 0
-        self.train_oe = train_oe
 
 
     ### initialize thresholds for the forward and feedback network. They are initialized per layer based on the EMSTDP paper
@@ -267,13 +295,30 @@ class Network(object):
 
 
     ## Training function per batch
-    def Train(self, input_spikes, label, bs, logits):
+    def Train(self, input_spikes, label, bs, 
+    task_start= False,
+    h0_index= [], h1_index = [],
+    past_weights = []):
 
 
         self.eps = 0.00000001
         step_size = 5*1000.0
         base_lr = 0.0001
         max_lr = 0.002
+
+
+        # #here is the NIPSA algorithm:
+        # if len(past_weights) !=0:
+        #     # if task_start:
+        #     #     self.w_h[1] = np.random.normal(0, np.sqrt(3.0 / 300), [300, 300])
+
+
+        #     for i in range(len(h1_index)):
+        #         for j in range(len(h0_index)):
+        #             self.w_h[1][i,j] = past_weights[h1_index[i],h0_index[j]]
+            # # 10% weights 0
+            # for i in range(len(self.w_h[1][0])):
+            #     for j in range(len(self.w_h[1][1]))
 
         n_hidden = len(self.hiddens)
         # hidden_spikes = np.zeros()
@@ -349,17 +394,13 @@ class Network(object):
             output_spikes[t, :, :] = U_o[t, :, :] >= self.threshold_o
             U_o[t, output_spikes[t, :, :]] = 0
 
-            lambda_ = 1
             # second phase
             if (t > (self.twin)):
                 # calculation of the loss
                 if self.delt == 0: #no relu
                     for k in range(bs):
-                        if self.train_oe:
-                            delta[t,k,:] = -lambda_*logits
-                        else:
-                            delta[t, k, label[k]] = (np.sum(output_spikes[t - self.epsilon:t, k, label[k]], axis=0) < 1).astype(float)
-                            delta[t, k, np.concatenate((np.arange(0,label[k]), np.arange(label[k]+1,self.outputs)))] = -(np.sum(output_spikes[t - 1:t, k, np.concatenate((np.arange(0,label[k]), np.arange(label[k]+1,self.outputs)))], axis=0) >= 1).astype(float)
+                        delta[t, k, label[k]] = (np.sum(output_spikes[t - self.epsilon:t, k, label[k]], axis=0) < 1).astype(float)
+                        delta[t, k, np.concatenate((np.arange(0,label[k]), np.arange(label[k]+1,self.outputs)))] = -(np.sum(output_spikes[t - 1:t, k, np.concatenate((np.arange(0,label[k]), np.arange(label[k]+1,self.outputs)))], axis=0) >= 1).astype(float)
                 elif self.delt == 1:  #relu true class
                     for k in range(bs):
                         delta[t, k, label[k]] = (np.sum(output_spikes[t - self.epsilon:t, k, label[k]], axis=0) < self.epsilon).astype(float)
@@ -517,7 +558,18 @@ class Network(object):
                         newlr = self.lr / np.sqrt(self.lm_h[der] + self.eps)
                         # newlr = self.lr
                         # *((bs * np.sqrt(3.0 / self.hiddens[der - 1]) / 2.0) / float(self.twin * twn))
+                        
+                        
+
+                        # '''
+                        # for incremental learning
+                        # '''
+                        # if der ==1:
+                        #     self.w_h[der][past_matrix!=0] = past_matrix[past_matrix!=0]
+
+                        self.deri = tpp
                         self.w_h[der] += np.multiply(tpp, newlr)
+
                         if self.clp:
                             self.w_h[der] = np.clip(self.w_h[der], a_min= -self.lim*nlim, a_max=self.lim)
 
@@ -556,10 +608,33 @@ class Network(object):
                         self.w_h[0] = np.clip(self.w_h[0], a_min=-self.lim*nlim, a_max=self.lim)
 
         self.energy = np.sum(np.abs(sdelta))/float(bs)
+        self.probe_spike = np.sum(hidden_spikes[0][:,:,:], axis=0)
+        self.probe_spike_2 = np.sum(hidden_spikes[1][:,:,:], axis=0)
+        self.out_spike = np.sum(output_spikes[:,:,:], axis=0)
+
+
+        #here is the NIPSA algorithm:
+        if len(past_weights) !=0:
+            # if task_start:
+            #     self.w_h[1] = np.random.normal(0, np.sqrt(3.0 / 300), [300, 300])
+
+
+            # for i in range(len(h1_index)):
+            #     for j in range(len(h0_index)):
+            #         self.w_h[1][i,j] = past_weights[h1_index[i],h0_index[j]]
+            der_w_important = l2_derivative(self.w_h[1],past_weights,h1_index,h0_index)
+            der_w_2 =l2_derivative(self.w_h[1],np.zeros_like(self.w_h[1]), np.arange(self.w_h[1].shape[0])
+                                   
+                                   , np.arange(self.w_h[1].shape[1]))
+            
+            self.w_h[1] = self.w_h[1] - 0.0000001*(der_w_important+der_w_2)
+
 
         return np.argmax(np.sum(output_spikes[range(self.twin), :,:], axis=0), axis=-1), np.power(self.energy / (self.T - 1), 2)
 
 
+    def probes(self):
+        return self.probe_spike, self.probe_spike_2, self.deri
     # @numba.jit
     # @profile
     def Test(self, input_spikes, bs):
@@ -603,4 +678,48 @@ class Network(object):
             predict = np.argmax(outs, axis = -1)
 
         return outs, predict
+        
 
+    def validate(self, input_spikes, bs):
+        n_hidden = len(self.hiddens)
+        # hidden_spikes = np.zeros()
+        hidden_spikes = [1] * n_hidden
+        U_h = [1] * n_hidden
+        for i in range(n_hidden):
+            hidden_spikes[i] = np.zeros([self.T, bs, self.hiddens[i]], dtype=bool)
+        # hidden_spikes = np.zeros([hiddens,T])
+        output_spikes = np.zeros([self.T, bs, self.outputs], dtype=bool)
+        for i in range(n_hidden):
+            U_h[i] = np.zeros([self.T, bs, self.hiddens[i]])
+        U_o = np.zeros([self.T, bs, self.outputs])
+        # inputs = np.shape(input_spikes)[1]
+        self.energy = 0.0
+
+        for t in range(1, self.T):
+
+            U_h[0][t, :, :] = oe.contract("Bi,ij->Bj", input_spikes[t - 1, :, :], self.w_h[0]) + U_h[0][t - 1, :,
+                                                                                                     :] + \
+                                  self.threshold_h[0] * self.bias
+            hidden_spikes[0][t, :, :] = U_h[0][t, :, :] >= self.threshold_h[0]
+            U_h[0][t, hidden_spikes[0][t, :, :]] = 0
+
+            for h in range(1, n_hidden):
+                U_h[h][t, :, :] = oe.contract("Bi,ij->Bj", hidden_spikes[h - 1][t - 1, :, :], self.w_h[h]) + U_h[h][
+                                                                                                                 t - 1,
+                                                                                                                 :, :] + \
+                                      self.threshold_h[h] * self.bias
+                hidden_spikes[h][t, :, :] = U_h[h][t, :, :] >= self.threshold_h[h]
+                U_h[h][t, hidden_spikes[h][t, :, :]] = 0
+
+            U_o[t, :, :] = oe.contract("Bi,ij->Bj", hidden_spikes[n_hidden - 1][t - 1, :, :], self.w_o) + U_o[t - 1,
+                                                                                                              :,
+                                                                                                              :] + self.threshold_o * self.bias
+            output_spikes[t, :, :] = U_o[t, :, :] >= self.threshold_o
+            U_o[t, output_spikes[t, :, :]] = 0
+
+            outs = np.sum(output_spikes[:,:,:], axis=0)
+            predict = np.argmax(outs, axis = -1)
+            first_index = np.sum(hidden_spikes[0][:,:,:],axis =0)
+            second_index = np.sum(hidden_spikes[1][:,:,:],axis =0)
+
+        return first_index,second_index
