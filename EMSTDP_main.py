@@ -3,13 +3,13 @@ from cv2 import log
 
 from scipy.ndimage.measurements import labeled_comprehension
 from scipy.special import softmax
+from matplotlib import pyplot as plt
 
 import sys
 # import pyximport; pyximport.install()
 
 import numpy as np
 import EMSTDP_algo as svp
-# import BPSNN_allSpikeErr_batcheventstdp2 as svp
 import matplotlib.pyplot as plt
 import pickle
 import gzip
@@ -25,6 +25,7 @@ import torchvision.transforms as trn
 import torch
 from utils import get_measures
 from utils import print_measures
+from utils import train_snn,test_snn,train_oe
 path = os.getcwd()
 
 train_data = np.load(path +"/em_data/em_t.npy")
@@ -82,7 +83,7 @@ final_energy = np.zeros([epochs])
 
 hiddenThr1 = 0.5
 outputThr1 = 0.1
-dense_size = 1024
+dense_size = 28*28
 train_size = len(train_data)
 test_size = len(test_data)
 energies = np.zeros([train_size])
@@ -97,9 +98,8 @@ tmp_d = np.zeros([T, batch_size, dense_size])
 lr = 0.003
 online_norm = False
 # def __init__(self, dfa, dropr, evt, norm, rel, delt, dr, init, clp, lim, inputs, hiddens, outputs, threshold_h, threshold_o, T=100, bias=0.0, lr=0.0001, scale=1.0, twin=100, epsilon=2):
-snn_network = svp.Network(0, dropr, 0, 0.0, rel, delt, 1, 0, clp, lim, dense_size, h, 2, hiddenThr1*fr, outputThr1*fr, T, bias, lr, scale, twin, epsilon,
-
-                         online_norm= False, train_oe= True)
+snn_network = svp.Network(0, dropr, 0, 0.0, rel, delt, 1, 0, clp, lim, dense_size, [100,100], 6, hiddenThr1*fr, outputThr1*fr, T, bias, lr, scale, twin, epsilon,
+online_norm= True)
 
 train_acc =[]
 test_acc = []
@@ -109,50 +109,7 @@ load_epoch = 1
 
 ver_period = 1000
 s_index = data_index
-# for ep in trange(epochs):
-# for ep in range(epochs):
-#     snn_network.lr = 1.0 / (1.0 * (5000.0+ ep ))
-#     pred1 = np.zeros([train_size])
-#     # np.random.shuffle(s_index)
-#     spikes = np.zeros([T, batch_size, dense_size]).astype(float)
-#     spikes2 = np.zeros([T, batch_size, dense_size]).astype(float)
-#     # for i in trange(train_size / batch_size, leave=False):
-#     for i in trange(int (train_size / batch_size)):
-#         if ((i + 1) * batch_size % ver_period == 0):  # 5000
-#             pred = np.zeros([int(test_size)])
-#             for i2 in range(int(test_size / tbs)):  # train_size
 
-#                 tmp_rand = np.random.random([T, 1, 1])
-#                 randy = np.tile(tmp_rand, (1, tbs, dense_size))
-
-#                 tmp_d = np.tile(dataTest[:, i2 * tbs:(i2 + 1) * tbs, :], (T, 1, 1))
-#                 spikes2 = randy < (tmp_d * fr)
-
-#                 _,pred[i2 * tbs:(i2 + 1) * tbs] = snn_network.Test(spikes2.astype(float), tbs)
-#             acn = sum(pred == labelTest[:test_size]) / float(test_size)
-#             print( str(ep) + " test_accuray " + str(acn) + " LR " + str(snn_network.lr))
-#             test_acc.append(acn)
-#             acc.append(sum(pred == labelTest[:test_size]) / float(test_size))
-
-#         tmp_rand = np.random.random([T, 1, 1])
-#         randy = np.tile(tmp_rand, (1, batch_size, dense_size))
-#         tmp_d = np.tile(data[:, s_index[i * batch_size:(i + 1) * batch_size], :], (T, 1, 1))
-#         spikes = randy < (tmp_d * fr)
-#         pred1[i * batch_size:(i + 1) * batch_size], energies[i] = snn_network.Train(spikes.astype(float), (
-#         label[s_index[i * batch_size:(i + 1) * batch_size]]), batch_size)
-#     acn = sum(pred1 == label[s_index[:train_size]]) / float(train_size)
-#     train_acc.append(acn)
-
-#     print(str(ep) + " train_accuray " + str(acn))
-#     np.save("w_h.npy", snn_network.w_h)
-#     np.save("w_o.npy",snn_network.w_o)
-# np.save("train_acc.npy", train_acc)
-# np.save("test_acc.npy", test_acc)
-
-w_h = np.load("w_h.npy")
-w_o = np.load("w_o.npy")
-snn_network.w_h = w_h
-snn_network.w_o = w_o
 # oe snn, first to train outlier exposure number, the outlier exposure number should be 1/5 
 # of the indistribution sample
 # epoch 50, batch size is 1
@@ -171,139 +128,190 @@ ver_period = train_size
 epochs = 50                              # number of epochs
 data_oe = TRAINING[0][0:100]
 data_oe = np.reshape(data_oe, (len(data_oe),28,28))
-data_ood = np.zeros((len(data_oe),32,32))
-
-for i in range(len(data_oe)):
-    img = data_oe[i]
-    res = cv2.resize(img,dsize=(32,32))
-    data_ood[i] = res
-
-data_ood = np.reshape(data_ood, (1,len(data_ood),dense_size)).astype(float)/255.0
-
-
-
-def train_oe(epochs = 50, batch_size =1, data = data_ood, dense_size = 32*32):
-    for ep in range(epochs):
-        snn_network.lr = 1.0 / (1.0 * (5000.0+ ep ))
-        train_size = data.shape[1]
-        pred1 = np.zeros([train_size])
-        # np.random.shuffle(s_index)
-        spikes = np.zeros([T, batch_size, dense_size]).astype(float)
-        for i in trange(int (train_size / batch_size)):
-            tmp_rand = np.random.random([T, 1, 1])
-            randy = np.tile(tmp_rand, (1, batch_size, dense_size))
-            tmp_d = np.tile(data[:, s_index[i * batch_size:(i + 1) * batch_size], :], (T, 1, 1))
-            spikes = randy < (tmp_d * fr)
-            # get logits
-            outs,_ = snn_network.Test(spikes.astype(float),1)
-            logits = outs/T
-
-            pred1[i * batch_size:(i + 1) * batch_size], energies[i] = snn_network.Train(spikes.astype(float), (
-            label[s_index[i * batch_size:(i + 1) * batch_size]]), batch_size, logits= logits)
-        acn = sum(pred1 == label[s_index[:train_size]]) / float(train_size)
-
-
-
-train_oe()
-np.save("oe_w_h.npy", snn_network.w_h)
-np.save("oe_w_o.npy", snn_network.w_o)
+# data_ood = np.zeros((len(data_oe),32,32))
+path = os.getcwd() +"/incre_data/"
 
 
 
 
+'''
+take the random indices and return dataset
+'''
 
-
-
-
-
-
-
-def test_snn(snn_network,d_30_test, d_30_test_label, dense_size = 32*32, conv= False, T =100 , test_batch =1):
+def random_idx(train_,train_label, oe_train, oe_label):
+    idx = np.arange(train_.shape[0]+oe_train.shape[0])
+    np.random.shuffle(idx)
+    data = np.vstack((train_,oe_train))
+    label = np.concatenate((train_label, oe_label))
+    data = data[idx]
+    label = label[idx]
     
-    in_score = []
-    right_score = []
-    wrong_score = []
+    return data, label
+def ood_data():
+        d_1 = np.load(path+"state_"+str(0)+"_x.npy")
+        d_1 = 255*np.reshape(d_1,(-1,28,28)).astype(float)
+        d_2 = np.load(path+"state_"+str(1)+"_x.npy")
+        d_2 = 255*np.reshape(d_2,(-1,28,28)).astype(float)
+        ood_data = np.vstack((d_1,d_2))
+        d1_label = np.load(path+"state_"+str(1)+"_y.npy")
+        d2_label = np.load(path+"state_"+str(2)+"_y.npy")
+        ood_label = np.concatenate((d1_label,d2_label))
+        
+        return d_1,d1_label,d_2,d2_label
+
+
+# train 1000 outlier samples
+def outlier_exposure(snn_network = snn_network):
+    label = np.random.randint(6,size= (2000,))
+    data = TRAINING[0][:2000]
+    data = np.reshape(data, (len(data),28,28))
+    scale = 1/np.max(data)
+    data = scale*data
+    data = np.expand_dims(np.reshape(data, [-1,dense_size]), axis=0)
     
-    fr =1
-    if conv:
-       print("wrong")
-    total_test = len(d_30_test_label)
-    out = []
-    pred = np.zeros([total_test])
-    for i2 in trange(int (total_test/test_batch)):
-        tmp_rand = np.random.random([T, 1, 1])
-        randy = np.tile(tmp_rand, (1, test_batch, dense_size))
-        tmp_d = np.tile(d_30_test[:, i2 * test_batch:(i2 + 1) * test_batch, :], (T, 1, 1))
-        spikes2 = randy < (tmp_d * fr)
-        outs, pred[i2 * test_batch:(i2 + 1) * test_batch] = snn_network.Test(spikes2.astype(float), test_batch)
-        if len(out) ==0:
-            out = outs
-        else:
-            out = np.vstack((out,outs))
+    snn_network = train_oe(snn_network,data,label, batch_size= 100
+                                ,dense_size= 784,detect_size= 1)
     
-    acn = sum(pred == d_30_test_label[:total_test]) / float(total_test)
-    print("final test result is : ", acn)
-    wrong_index = np.where(pred !=d_30_test_label[:total_test] )
-    correct_index = np.where(pred ==d_30_test_label[:total_test] )
-
-    return acn , out,correct_index,wrong_index
-
-acc, outs, r_index, w_index = test_snn(snn_network, dataTest,labelTest)
-outs = outs/T
-in_score = softmax(outs, axis= -1)
-in_score =outs
-in_score = -np.max(in_score, axis=1)
-
-print(in_score)
-
-
-
-
-def get_ood_scores(snn_network,d_30_test, d_30_test_label, dense_size = 32*32, conv= False, T =100 , test_batch =1):
-    
-    in_score = []
-
-    
-    fr =1
-    if conv:
-       print("wrong")
-    total_test = len(d_30_test_label)
-    out = []
-    pred = np.zeros([total_test])
-    for i2 in trange(int (total_test/test_batch)):
-        tmp_rand = np.random.random([T, 1, 1])
-        randy = np.tile(tmp_rand, (1, test_batch, dense_size))
-        tmp_d = np.tile(d_30_test[:, i2 * test_batch:(i2 + 1) * test_batch, :], (T, 1, 1))
-        spikes2 = randy < (tmp_d * fr)
-        outs, pred[i2 * test_batch:(i2 + 1) * test_batch] = snn_network.Test(spikes2.astype(float), test_batch)
-        if len(out) ==0:
-            out = outs
-        else:
-            out = np.vstack((out,outs))
+    return snn_network
     
 
-    outs = out/T
-    in_score = softmax(outs, axis= -1)
-    in_score = outs
-    in_score = -np.max(in_score, axis=1)
+def test_2_ood():
+        # d_1 = np.load(path+"state_"+str(1)+"_x.npy")
+        # d_1 = 255*np.reshape(d_15_train,(-1,28,28)).astype(float)[:100]
+        d_2 = np.load(path+"state_"+str(2)+"_x.npy")
+        d_2 = 255*np.reshape(d_2,(-1,28,28)).astype(float)[:200]
+        # ood_data = np.vstack((d_1,d_2))
+        # d1_label = np.load(path+"state_"+str(1)+"_y.npy")[:100]
+        d2_label = np.load(path+"state_"+str(2)+"_y.npy")[:200]
+        # ood_label = np.concatenate((d1_label,d2_label))
+        
+        return d_2, d2_label  
+    
+def test_1_ood():
+        d_1 = np.load(path+"state_"+str(1)+"_x.npy")
+        d_1 = 255*np.reshape(d_15_train,(-1,28,28)).astype(float)[:100]
+        d_2 = np.load(path+"state_"+str(2)+"_x.npy")
+        d_2 = 255*np.reshape(d_2,(-1,28,28)).astype(float)[:100]
+        ood_data = np.vstack((d_1,d_2))
+        d1_label = np.load(path+"state_"+str(1)+"_y.npy")[:100]
+        d2_label = np.load(path+"state_"+str(2)+"_y.npy")[:100]
+        ood_label = np.concatenate((d1_label,d2_label))
+        
+        return ood_data, ood_label 
 
-    return in_score
+
+    
+    
+    
 
 
-out_score = get_ood_scores(snn_network,ood_data, ood_label, dense_size = 32*32, conv= False, T =100 , test_batch = 1)
+state_size = 3
+def TPR95(score):
+    count = int(len(score)*0.05)
+    idx = np.argsort(score)
+    return score[idx[count]]
 
-auroc_list, aupr_list, fpr_list = [], [], []
+for i in range(1):
+        print("state number: " +str(i))
+        # d_15_train = np.load(path+"state_"+str(i)+"_x.npy")
+        data_oe = TRAINING[0][0:200*(state_size+1)]
+        data_oe = np.reshape(data_oe, (len(data_oe),28,28))
+        oe_label = TRAINING[1][0:200*(state_size+1)]
+        d_15_train = np.load(path+"state_"+str(i)+"_x.npy")
+        d_15_train = 255*np.reshape(d_15_train,(-1,28,28)).astype(float)
+        scale = 1/np.max(d_15_train)
+        d_15_train = scale*d_15_train[:400]
+        d_15_test = d_15_train
+        h,w = d_15_train.shape[1],d_15_train.shape[2]
+        d_15_train_label = np.load(path+"state_"+str(i)+"_y.npy")[:400]
+        # data,label = random_idx(d_15_train,d_15_train_label,d_15_train,d_15_train_label)
+        d_15_train_new = np.expand_dims(np.reshape(d_15_train, [-1,dense_size]), axis=0)
+        for nn in range(3):
+                snn_network = train_snn(snn_network,d_15_train_new,d_15_train_label, batch_size= 10
+                                        ,dense_size= 784,detect_size= 1)
+                if nn%2 == 0:
+                    outlier_exposure()
+        acc,outs,_,_ =  test_snn(snn_network,d_15_train_new,d_15_train_label, dense_size= 784)
+        
+        
+        
+        in_score = np.max(outs, axis=1)
+        print(in_score[:20])
+        threshold = TPR95(in_score)
+        indx = np.argsort(in_score)
+        print("minimum value", in_score[indx[:10]])
+       
+        
+        ood_data,ood_label = test_2_ood()
+        ood_new = np.expand_dims(np.reshape(ood_data, [-1,dense_size]), axis=0)
+    
+        print("ood_score length: ", len(ood_label))
+    
+        acc,outs,_,_ = test_snn(snn_network,ood_new,ood_label, dense_size= 784)
+        out_score = np.max(outs, axis=1)
+        print("out scores: ", out_score[:20])
+        
+        '''
+        Calculate FP
+        '''
+        FP = 0
+        TN = 0
+        for kk in range(len(out_score)):
+            if out_score[kk]> threshold:
+                FP+=1
+        print("out score length: ", len(out_score))
+        print(FP)
 
-
-def get_and_print_results(in_score, out_score, num_to_avg= 1):
-
-    aurocs, auprs, fprs = [], [], []
-    for _ in range(num_to_avg):
-        measures = get_measures(out_score, in_score)
-        aurocs.append(measures[0]); auprs.append(measures[1]); fprs.append(measures[2])
-
-    auroc = np.mean(aurocs); aupr = np.mean(auprs); fpr = np.mean(fprs)
-    auroc_list.append(auroc); aupr_list.append(aupr); fpr_list.append(fpr)
-    print_measures(auroc, aupr, fpr, "mstar")
-
-get_and_print_results(in_score, out_score)
+def oe_task_2():
+    for i in range(1):
+            print("state number: " +str(i))
+            # d_15_train = np.load(path+"state_"+str(i)+"_x.npy")
+            # d_15_train = np.load(path+"state_"+str(i)+"_x.npy")
+            # d_15_train = 255*np.reshape(d_15_train,(-1,28,28)).astype(float)
+            d_1,d1_label,d_2,d2_label = ood_data()
+            d_15_train,d_15_train_label = random_idx(d_1,d1_label, d_2,d2_label)
+            scale = 1/np.max(d_15_train)
+            d_15_train = scale*d_15_train[:400]
+            d_15_test = d_15_train
+            h,w = d_15_train.shape[1],d_15_train.shape[2]
+        
+            d_15_train_label = d_15_train_label[:400]
+        
+            d_15_train_new = np.expand_dims(np.reshape(d_15_train, [-1,dense_size]), axis=0)
+            for nn in range(40):
+                snn_network = train_snn(snn_network,d_15_train_new,d_15_train_label, batch_size= 10
+                                        ,dense_size= 784,detect_size= 1)
+                if nn%2 == 0:
+                    outlier_exposure()
+                
+            acc,outs,_,_ =  test_snn(snn_network,d_15_train_new,d_15_train_label, dense_size= 784)
+            ood_data,ood_label = test_2_ood()
+            scale = 1/np.max(ood_data)
+            ood_data = scale*ood_data
+            ood_new = np.expand_dims(np.reshape(ood_data, [-1,dense_size]), axis=0)
+        
+        
+            # outs = outs/T
+            # in_score = softmax(outs, axis= -1)
+            in_score = np.max(outs, axis=1)
+            in_score = in_score[:400]
+            th = TPR95(in_score)
+            print(in_score[:10])
+            print(th)
+        
+            acc,outs,_,_ = test_snn(snn_network,ood_new,ood_label, dense_size= 784)
+            print("out score length, ", outs )
+            # outs = outs/T
+            # out_score = softmax(outs, axis= -1)
+            out_score = np.max(outs, axis=1)
+            print(out_score[:10])
+            '''
+            Calculate FP
+            '''
+            FP = 0
+            TN = 0
+            for kk in range(len(out_score)):
+                if out_score[kk]> th:
+                    FP+=1
+            print(len(out_score))
+            print(FP)
